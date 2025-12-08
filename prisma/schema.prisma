@@ -1,0 +1,274 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  // output   = "../generated/prisma"
+}
+
+// have to fix this
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Stream {
+  VC
+  CA
+}
+
+enum ProblemType {
+  MCQ
+  NUMERIC
+  EXPRESSION
+  OPEN
+}
+
+model User {
+  id            String        @id @default(cuid())
+  email         String?       @unique
+  createdAt     DateTime      @default(now())
+  displayName   String?
+  rating        Int           @default(600) // live rating
+  passwordHash  String? // <— add this for email/password
+  attempts      Attempt[]
+  ratingHistory RatingEvent[] @relation("UserRatingHistory")
+  attemptCount  Int           @default(0) // NEW
+
+  xp             Int           @default(0)
+  gold           Int           @default(0)
+  lessonsEntered Int           @default(0)
+
+  archetypes UserArchetype[]
+  accounts Account[]
+  sessions Session[]
+}
+
+model Problem {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  promptLatex String   @unique
+
+  // MCQ fields become optional (so non-MCQ rows don’t need them)
+  choices       Json? // [{id:"A", latex:"..."}, ...]
+  correctChoice String?
+
+  seedRating    Int
+  rating        Int
+  topic         String
+  tags          String[]
+  solutions     String?
+  attempts      Attempt[]
+  ratingHistory RatingEvent[] @relation("ProblemRatingHistory")
+  attemptCount  Int           @default(0)
+
+  // NEW: question type + flexible payloads
+  type           ProblemType @default(MCQ) // backfill existing to MCQ
+  correctNumeric Json? // { value: "2.5", toleranceAbs?: 0.01, ... }
+  correctExpr    Json? // { latex: "\\frac{x+1}{x}", domain?: "x>0", ... }
+  openRubric     Json? // { maxPoints: 5, criteria: [...], ... }
+  requireForm    String[]    @default([])
+
+  archetypeId String?
+  archetype   Archetype? @relation(fields: [archetypeId], references: [id], onDelete: SetNull)
+
+  @@index([rating])
+  @@index([archetypeId])
+}
+
+model Attempt {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  userId    String?
+  guestId   String?
+  problemId String
+
+  // MCQ selection becomes optional (free-response attempts won’t set it)
+  chosen       String? // "A"/"B"/"C"/"D" for MCQ; null otherwise
+  correct      Boolean
+  timeMs       Int
+  deltaUser    Int
+  deltaProblem Int
+
+  // NEW: free response fields
+  freeResponse String? // raw user input
+  normalized   String? // canonicalized form (e.g., simplified expr)
+  score        Decimal? @db.Decimal(4, 3) // 0.000..1.000 (use Decimal to avoid FP drift)
+
+  User    User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([guestId])
+  @@index([problemId])
+}
+
+model RatingEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  userId    String?
+  problemId String?
+
+  // Relation fields (the "opposite" side), with names to disambiguate
+  user    User?    @relation("UserRatingHistory", fields: [userId], references: [id], onDelete: Cascade)
+  problem Problem? @relation("ProblemRatingHistory", fields: [problemId], references: [id], onDelete: Cascade)
+
+  before Int
+  after  Int
+  delta  Int
+  reason String // "attempt"
+}
+
+model Account {
+  id                String @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+
+  refresh_token String? @db.Text
+  access_token  String? @db.Text
+  expires_at    Int?
+  token_type    String?
+  scope         String?
+  id_token      String? @db.Text
+  session_state String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model AnalyticsEvent {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  problemId  String
+  correct    Boolean
+  responseMs Int
+}
+
+// ===================
+// NEW / UPDATED BLOCKS
+// ===================
+
+enum LessonKind {
+  HEURISTIC // “When you see X, think Y” trigger card
+  WORKED_EXAMPLE // Stepper-style walkthrough
+  PRACTICE_GUIDE // Short notes, pitfalls, checklist
+}
+
+model Archetype {
+  id      String  @id @default(cuid())
+  slug    String  @unique
+  title   String
+  stream  Stream
+  order   Int // position within a stream’s crash playlist
+  summary String?
+  eloMin  Int     @default(200) // local ladder lower bound
+  eloMax  Int     @default(1900)
+
+  domainId  String?
+  domain    Domain?  @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  // relations
+  lessons  Lesson[]
+  problems Problem[]
+  userProgress UserArchetype[]
+
+  // Keep order unique per (stream, order)
+  @@unique([stream, order])
+  @@index([domainId])
+
+}
+
+model Lesson {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  archetypeId  String
+  kind         LessonKind
+  title        String
+  // Store rich content as Markdown or portable JSON (choose one).
+  // Markdown keeps things simple at first:
+  bodyMarkdown String     @db.Text
+  // If you prefer structured content, add bodyJson Json? instead.
+
+  order     Int // display order in the archetype (1..N)
+  published Boolean @default(false)
+
+  archetype Archetype @relation(fields: [archetypeId], references: [id], onDelete: Cascade)
+
+  @@unique([archetypeId, order]) // no duplicate positions within an archetype
+  @@index([archetypeId])
+}
+
+model UserArchetype {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // who + which ladder
+  userId        String
+  archetypeId   String
+
+  // the local ladder (200 → 1900)
+  rating        Int      @default(200)
+  attemptCount  Int      @default(0)
+  streak        Int      @default(0)
+  lastPlayedAt  DateTime @default(now())
+
+  // relations
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  archetype  Archetype @relation(fields: [archetypeId], references: [id], onDelete: Cascade)
+
+  // constraints & indexes
+  @@unique([userId, archetypeId])   // exactly one ladder per (user, archetype)
+  @@index([archetypeId])            // fast “show my standing in this archetype”
+  @@index([userId])                 // quick “list my ladders”
+}
+
+model Subject {
+  id        String   @id @default(cuid())
+  slug      String   @unique            // e.g., "math"
+  title     String                      // "Mathematics"
+  order     Int       @default(1)
+  summary   String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  domains   Domain[]
+}
+
+model Domain {
+  id         String   @id @default(cuid())
+  slug       String   @unique            // e.g., "complex-analysis"
+  title      String                      // "Complex Analysis"
+  order      Int       @default(1)
+  summary    String?
+  subjectId  String
+
+  subject    Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  archetypes Archetype[]
+
+  @@index([subjectId])
+}
