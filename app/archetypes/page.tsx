@@ -1,10 +1,10 @@
-// app/page.tsx
+// app/archetypes/page.tsx
 'use client';
 
 import { useState } from 'react';
 
-export default function HomePage() {
-  const [archetypeId, setArchetypeId] = useState('');
+export default function ArchetypesPage() {
+  const [domainId, setDomainId] = useState('');
   const [jsonInput, setJsonInput] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -15,10 +15,13 @@ export default function HomePage() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/import-problems', {
+      const res = await fetch('/api/import-archetypes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ archetypeId, rawJson: jsonInput }),
+        body: JSON.stringify({
+          domainId,
+          rawJson: jsonInput,
+        }),
       });
 
       const data = await res.json();
@@ -26,7 +29,10 @@ export default function HomePage() {
       if (!res.ok) {
         setStatus(`❌ ${data.message ?? 'Request failed'}`);
       } else {
-        setStatus(`✅ Inserted ${data.inserted} problems`);
+        const { upsertedCount, domainSlug } = data;
+        setStatus(
+          `✅ Upserted ${upsertedCount} archetypes (domain: ${domainSlug})`
+        );
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -40,57 +46,47 @@ export default function HomePage() {
     <main className="min-h-screen flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-2xl space-y-4">
         <h1 className="text-2xl font-semibold">
-          Pipeline v0 – Manual Problem Import
+          Pipeline v0 – Archetype Import
         </h1>
+
         <p className="text-sm text-gray-600">
-          Paste a JSON array (or an object with <code>problems</code>) of
-          problems and bind them to an archetype.
+          Enter a <code>domainId</code>, then paste a JSON array of archetypes
+          or an object with <code>archetypes</code>.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1">
-            <label className="block text-sm font-medium">Archetype ID</label>
+          <div>
+            <label className="block text-sm font-medium">Domain ID</label>
             <input
               type="text"
-              value={archetypeId}
-              onChange={(e) => setArchetypeId(e.target.value)}
+              value={domainId}
+              onChange={(e) => setDomainId(e.target.value)}
               className="w-full border rounded px-2 py-1 text-sm"
-              placeholder="Enter ArchetypeId"
+              placeholder="domain cuid here"
               required
             />
           </div>
 
-          <div className="space-y-1">
-            <label className="block text-sm font-medium">Problems JSON</label>
+          <div>
+            <label className="block text-sm font-medium">Archetypes JSON</label>
             <textarea
               value={jsonInput}
               onChange={(e) => setJsonInput(e.target.value)}
               className="w-full border rounded px-2 py-1 text-sm font-mono"
-              rows={14}
+              rows={16}
               placeholder={`[
   {
-    "promptLatex": "...",
-    "choices": [
-      { "id": "A", "latex": "..." },
-      { "id": "B", "latex": "..." },
-      { "id": "C", "latex": "..." },
-      { "id": "D", "latex": "..." }
-    ],
-    "correctChoice": "B",
-    "seedRating": 200,
-    "rating": 200,
-    "topic": "ca:cauchy-goursat",
-    "tags": ["cauchy-goursat"],
-    "solutions": "..."
+    "slug": "vc-curves-motion",
+    "title": "Curves, Tangents & Motion in Space",
+    "stream": "VC",
+    "order": 1,
+    "summary": "Parametric curves, tangent vectors, velocity, acceleration.",
+    "eloMin": 200,
+    "eloMax": 1900
   }
 ]`}
               required
             />
-            <p className="text-xs text-gray-500">
-              You can paste either:
-              <br />• a JSON array of problems, or
-              <br />• an object: &#123; &quot;problems&quot;: [ ... ] &#125;
-            </p>
           </div>
 
           <button
@@ -98,7 +94,7 @@ export default function HomePage() {
             disabled={loading}
             className="px-4 py-2 rounded bg-black text-white text-sm disabled:opacity-60"
           >
-            {loading ? 'Importing…' : 'Validate &amp; Insert'}
+            {loading ? 'Importing…' : 'Validate & Upsert'}
           </button>
         </form>
 
