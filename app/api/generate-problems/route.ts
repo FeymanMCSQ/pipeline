@@ -2,114 +2,93 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+
 import { buildPrompt } from '@/lib/prompts/buildPrompt';
 import { callGenerator } from '@/lib/ai/generate';
+import { parseAndValidateAiBatch } from '@/lib/validators/parseAndValidateAiBatch';
+import { insertProblems } from '@/lib/db/insertProblems';
+import type { GeneratedProblemBatch } from '@/schema/problemSchema';
 
-// Basic input validation
+// ----------------------------
+// 1. Input validation schema
+// ----------------------------
 const bodySchema = z.object({
-  archetypeId: z.string().min(1, 'archetypeId is required'),
-  band: z.string().min(1, 'band is required'),
-  // allow string or number, coerce to number
-  count: z.coerce.number().int().min(1).max(50).default(5),
+  archetypeId: z.string().min(1),
+  band: z.string().min(1),
+  count: z.coerce.number().int().min(1).max(50),
 });
 
-// Mock problem type
-type MockProblem = {
-  promptLatex: string;
-  type: 'MCQ';
-  choices: string[];
-  correctChoice: number;
-  rating: number;
-  archetypeId: string;
-  band: string;
-  tags: string[];
-  solutions: string[];
-};
-
-// fake problems for now
-function makeMockProblems(
-  archetypeId: string,
-  band: string,
-  count: number
-): MockProblem[] {
-  const problems: MockProblem[] = [];
-
-  for (let i = 0; i < count; i++) {
-    problems.push({
-      promptLatex: `\\text{Mock problem ${
-        i + 1
-      } for archetype ${archetypeId} in band ${band}}`,
-      type: 'MCQ',
-      choices: ['Option A', 'Option B', 'Option C', 'Option D'],
-      correctChoice: 0,
-      rating: 250,
-      archetypeId,
-      band,
-      tags: ['mock', 'dev'],
-      solutions: [
-        'This is a mock solution. In v1.1 this will be AI-generated.',
-      ],
-    });
-  }
-
-  return problems;
-}
-
+// ----------------------------
+// 2. Route handler
+// ----------------------------
 export async function POST(req: NextRequest) {
   try {
     const json = await req.json();
     const { archetypeId, band, count } = bodySchema.parse(json);
 
-    console.log('[generate-problems] called with:', {
-      archetypeId,
-      band,
-      count,
-    });
+    console.log('[generate-problems] Input:', { archetypeId, band, count });
 
-    // Build the minimal prompt
+    // 3. Build prompt
     const prompt = buildPrompt({ archetypeId, band, count });
-    console.log('\n[generate-problems] generated prompt:\n');
-    console.log(prompt);
-    console.log('\n--- end prompt ---\n');
+    console.log('\n[Prompt]\n', prompt, '\n[End prompt]\n');
 
-    // 🔹 NEW: call OpenRouter via callGenerator
-    let aiText: string | null = null;
+    // 4. Call the generator model
+    const aiText = await callGenerator(prompt);
+    console.log('\n[AI Raw Output]\n', aiText, '\n[End AI Output]\n');
+
+    // 5. JSON.parse + Zod validation (no repair step)
+    let validatedBatch: GeneratedProblemBatch;
     try {
-      aiText = await callGenerator(prompt);
-      console.log('\n[generate-problems] raw AI response:\n');
-      console.log(aiText);
-      console.log('\n--- end AI response ---\n');
-    } catch (aiErr) {
-      console.error('[generate-problems] AI call failed:', aiErr);
-      // For now we just fall back to mock problems regardless
+      validatedBatch = parseAndValidateAiBatch(aiText);
+    } catch (validationErr) {
+      console.error('[generate-problems] validation failed:', validationErr);
+
+      return NextResponse.json(
+        {
+          ok: false,
+          stage: 'validation',
+          error:
+            validationErr instanceof Error
+              ? validationErr.message
+              : 'Unknown validation error',
+        },
+        { status: 400 }
+      );
     }
 
-    // Still using mock problems in the response for now
-    const problems = makeMockProblems(archetypeId, band, count);
+    console.log(
+      `[Validation] ${validatedBatch.problems.length} problems validated`
+    );
 
+    // 6. Insert into DB, force-link to the archetype from the request
+    const { insertedCount } = await insertProblems(
+      validatedBatch.problems,
+      archetypeId
+    );
+
+    console.log(`[DB] Inserted ${insertedCount} problems`);
+
+    // 7. Return success
     return NextResponse.json({
       ok: true,
       meta: {
-        archetypeId,
-        band,
-        requestedCount: count,
-        generatedCount: problems.length,
-        // small preview so you can see AI output from the client if you want
-        aiPreview: aiText ? aiText.slice(0, 200) : null,
+        received: { archetypeId, band, count },
+        validated: validatedBatch.problems.length,
+        inserted: insertedCount,
       },
-      problems,
-      // full raw AI output included separately (can remove later if you want)
-      aiText,
+      problems: validatedBatch.problems,
     });
   } catch (err) {
-    console.error('[generate-problems] error:', err);
+    console.error('[generate-problems] Route error:', err);
 
     return NextResponse.json(
       {
         ok: false,
-        error: 'Invalid request or internal error',
-        details:
-          err instanceof Error ? err.message : 'Unknown error in generator',
+        stage: 'route',
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Invalid request or internal error',
       },
       { status: 400 }
     );
