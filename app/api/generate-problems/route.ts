@@ -107,6 +107,7 @@ import { AiBatchError } from '@/lib/validators/errors';
 import { insertProblems } from '@/lib/db/insertProblems';
 import type { GeneratedProblemBatch } from '@/schema/problemSchema';
 import type { ProblemType } from '@/lib/prompts/types';
+import { shuffleMcqProblem } from '@/lib/utils/shuffleMcq';
 
 const bodySchema = z.object({
   archetypeId: z.string().min(1),
