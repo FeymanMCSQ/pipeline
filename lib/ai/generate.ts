@@ -38,7 +38,7 @@ export async function callGenerator(prompt: string): Promise<string> {
       {
         role: 'system',
         content:
-          'You are an assistant that strictly follows instructions and responds concisely.',
+          'You are an assistant that strictly follows instructions and responds concisely.You are a backend data generator. Return ONLY valid JSON. No prose, no markdown.',
       },
       {
         role: 'user',
