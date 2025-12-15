@@ -22,7 +22,7 @@ Difficulty band: ${band}
 Difficulty characteristics (derived from system rating framework):
 ${bandInfo}
 
-Generate exactly ${count} problems.
+Generate exactly ${count} unique problems. Problems must not be the same
 
 Each problem must reflect the cognitive stage and difficulty constraints described above.
 
