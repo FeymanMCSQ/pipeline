@@ -8,21 +8,22 @@ datasource db {
 }
 
 model User {
-  id             String          @id @default(cuid())
-  email          String?         @unique
-  createdAt      DateTime        @default(now())
+  id             String           @id @default(cuid())
+  email          String?          @unique
+  createdAt      DateTime         @default(now())
   displayName    String?
-  rating         Int             @default(600)
+  rating         Int              @default(600)
   passwordHash   String?
-  attemptCount   Int             @default(0)
-  gold           Int             @default(0)
-  lessonsEntered Int             @default(0)
-  xp             Int             @default(0)
+  attemptCount   Int              @default(0)
+  gold           Int              @default(0)
+  lessonsEntered Int              @default(0)
+  xp             Int              @default(0)
   accounts       Account[]
   attempts       Attempt[]
-  ratingHistory  RatingEvent[]   @relation("UserRatingHistory")
+  ratingHistory  RatingEvent[]    @relation("UserRatingHistory")
   sessions       Session[]
   archetypes     UserArchetype[]
+  UserMetaDomain UserMetaDomain[]
 }
 
 model Problem {
@@ -193,16 +194,35 @@ model Subject {
 }
 
 model Domain {
-  id         String      @id @default(cuid())
-  slug       String      @unique
-  title      String
-  order      Int         @default(1)
-  summary    String?
-  subjectId  String
-  archetypes Archetype[]
-  subject    Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  id             String           @id @default(cuid())
+  slug           String           @unique
+  title          String
+  order          Int              @default(1)
+  summary        String?
+  subjectId      String
+  archetypes     Archetype[]
+  subject        Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  UserMetaDomain UserMetaDomain[]
 
   @@index([subjectId])
+}
+
+model UserMetaDomain {
+  id           String   @id
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime
+  userId       String
+  domainId     String
+  rating       Int      @default(400)
+  attemptCount Int      @default(0)
+  streak       Int      @default(0)
+  lastPlayedAt DateTime @default(now())
+  Domain       Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  User         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, domainId])
+  @@index([domainId])
+  @@index([userId])
 }
 
 enum Stream {
