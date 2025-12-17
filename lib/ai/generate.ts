@@ -45,6 +45,7 @@ export async function callGenerator(prompt: string): Promise<string> {
         content: prompt,
       },
     ],
+    response_format: { type: 'json_object' },
   };
 
   const res = await fetch(OPENROUTER_API_URL, {
